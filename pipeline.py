@@ -5,7 +5,6 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Generator
 
 from asana_client import AsanaClient
 
@@ -55,17 +54,6 @@ class SyncState:
 sync_state = SyncState()
 
 
-def _write_individual_files(directory: Path, items: Generator[dict, None, None]) -> int:
-    """Write each item as its own JSON file named by GID. Overwrites on each run."""
-    directory.mkdir(parents=True, exist_ok=True)
-    count = 0
-    for item in items:
-        path = directory / f"{item['gid']}.json"
-        with open(path, "w") as f:
-            json.dump(item, f, indent=2)
-        count += 1
-    return count
-
 
 def run_sync(token: str, workspace_gid: str):
     """Full extraction pipeline. Skips if a previous run is still active."""
@@ -81,17 +69,29 @@ def run_sync(token: str, workspace_gid: str):
     try:
         client = AsanaClient(token=token)
 
-        users_count = _write_individual_files(
-            OUTPUT_DIR / "users",
-            client.get_users(workspace_gid=workspace_gid),
-        )
-        logger.info(f"Wrote {users_count} users to {OUTPUT_DIR / 'users'}/")
+        users = list(client.get_users(workspace_gid=workspace_gid))
+        user_gids = [u["gid"] for u in users]
+        users_count = len(user_gids)
+        user_details_dir = OUTPUT_DIR / "user_details"
+        user_details_dir.mkdir(parents=True, exist_ok=True)
+        user_details = client.get_user_details_concurrent(user_gids=user_gids)
+        for detail in user_details:
+            path = user_details_dir / f"{detail['gid']}.json"
+            with open(path, "w") as f:
+                json.dump(detail, f, indent=2)
+        logger.info(f"Wrote {users_count} user details to {user_details_dir}/")
 
-        projects_count = _write_individual_files(
-            OUTPUT_DIR / "projects",
-            client.get_projects(workspace_gid=workspace_gid),
-        )
-        logger.info(f"Wrote {projects_count} projects to {OUTPUT_DIR / 'projects'}/")
+        projects = list(client.get_projects(workspace_gid=workspace_gid))
+        project_gids = [p["gid"] for p in projects]
+        projects_count = len(project_gids)
+        details_dir = OUTPUT_DIR / "project_details"
+        details_dir.mkdir(parents=True, exist_ok=True)
+        details = client.get_project_details_concurrent(project_gids=project_gids)
+        for detail in details:
+            path = details_dir / f"{detail['gid']}.json"
+            with open(path, "w") as f:
+                json.dump(detail, f, indent=2)
+        logger.info(f"Wrote {projects_count} project details to {details_dir}/")
 
         elapsed = time.monotonic() - start
         logger.info(f"Sync finished in {elapsed:.1f}s — {users_count} users, {projects_count} projects")

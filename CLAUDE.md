@@ -7,7 +7,7 @@ Background service that periodically extracts users and projects from the Asana 
 ## Architecture
 
 - `asana_client.py` — Asana API client with pagination and rate limit retry (respects `Retry-After` header)
-- `pipeline.py` — extraction pipeline with overlap guard (`SyncState`), writes `asana/users/<gid>.json` and `asana/projects/<gid>.json`
+- `pipeline.py` — extraction pipeline with overlap guard (`SyncState`), writes `asana/user_details/<gid>.json` and `asana/project_details/<gid>.json`
 - `app.py` — Flask + APScheduler, exposes `/health`, `/status`, `/trigger`
 - `gunicorn.conf.py` — single worker (scheduler must not be duplicated)
 

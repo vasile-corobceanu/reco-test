@@ -3,7 +3,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from asana_client import AsanaClient, MAX_RETRIES
+from asana_client import AsanaClient, MAX_RETRIES, PROJECT_DETAIL_FIELDS, USER_DETAIL_FIELDS
 
 
 def _mock_response(status_code=200, json_data=None, headers=None):
@@ -196,3 +196,115 @@ class TestGetProjects:
         assert len(projects) == 2
         assert projects[0]["name"] == "Project A"
         assert projects[1]["archived"] is True
+
+
+class TestGetUserDetail:
+    @patch.object(AsanaClient, "_request")
+    def test_returns_full_user(self, mock_request, client):
+        mock_request.return_value = {
+            "data": {
+                "gid": "1",
+                "name": "Alice",
+                "email": "alice@test.com",
+                "photo": {"image_128x128": "https://example.com/photo.png"},
+            },
+        }
+        detail = client.get_user_detail(user_gid="1")
+        assert detail["gid"] == "1"
+        assert detail["email"] == "alice@test.com"
+        mock_request.assert_called_once_with(
+            "users/1", params={"opt_fields": USER_DETAIL_FIELDS},
+        )
+
+
+class TestGetUserDetailsConcurrent:
+    @patch.object(AsanaClient, "_request")
+    def test_fetches_all_users(self, mock_request, client):
+        mock_request.side_effect = lambda endpoint, **kwargs: {
+            "data": {"gid": endpoint.split("/")[1], "name": f"User {endpoint}"}
+        }
+        results = client.get_user_details_concurrent(user_gids=["1", "2", "3"])
+        assert len(results) == 3
+        assert results[0]["gid"] == "1"
+        assert results[2]["gid"] == "3"
+
+    @patch.object(AsanaClient, "_request")
+    def test_preserves_input_order(self, mock_request, client):
+        mock_request.side_effect = lambda endpoint, **kwargs: {
+            "data": {"gid": endpoint.split("/")[1]}
+        }
+        gids = ["5", "3", "1", "4", "2"]
+        results = client.get_user_details_concurrent(user_gids=gids)
+        assert [r["gid"] for r in results] == gids
+
+    @patch.object(AsanaClient, "_request")
+    def test_empty_list(self, mock_request, client):
+        results = client.get_user_details_concurrent(user_gids=[])
+        assert results == []
+        mock_request.assert_not_called()
+
+
+class TestGetProjectDetail:
+    @patch.object(AsanaClient, "_request")
+    def test_returns_full_project(self, mock_request, client):
+        mock_request.return_value = {
+            "data": {
+                "gid": "10",
+                "name": "Project A",
+                "notes": "Description here",
+                "owner": {"gid": "1", "name": "Alice"},
+            },
+        }
+        detail = client.get_project_detail(project_gid="10")
+        assert detail["gid"] == "10"
+        assert detail["notes"] == "Description here"
+        mock_request.assert_called_once_with(
+            "projects/10", params={"opt_fields": PROJECT_DETAIL_FIELDS},
+        )
+
+    @patch.object(AsanaClient, "_request")
+    def test_calls_correct_endpoint(self, mock_request, client):
+        mock_request.return_value = {"data": {"gid": "99"}}
+        client.get_project_detail(project_gid="99")
+        mock_request.assert_called_once_with(
+            "projects/99", params={"opt_fields": PROJECT_DETAIL_FIELDS},
+        )
+
+
+class TestGetProjectDetailsConcurrent:
+    @patch.object(AsanaClient, "_request")
+    def test_fetches_all_projects(self, mock_request, client):
+        mock_request.side_effect = lambda endpoint, **kwargs: {
+            "data": {"gid": endpoint.split("/")[1], "name": f"Project {endpoint}"}
+        }
+        results = client.get_project_details_concurrent(project_gids=["10", "20", "30"])
+        assert len(results) == 3
+        assert results[0]["gid"] == "10"
+        assert results[1]["gid"] == "20"
+        assert results[2]["gid"] == "30"
+
+    @patch.object(AsanaClient, "_request")
+    def test_preserves_input_order(self, mock_request, client):
+        mock_request.side_effect = lambda endpoint, **kwargs: {
+            "data": {"gid": endpoint.split("/")[1]}
+        }
+        gids = ["5", "3", "1", "4", "2"]
+        results = client.get_project_details_concurrent(project_gids=gids)
+        assert [r["gid"] for r in results] == gids
+
+    @patch.object(AsanaClient, "_request")
+    def test_empty_list(self, mock_request, client):
+        results = client.get_project_details_concurrent(project_gids=[])
+        assert results == []
+        mock_request.assert_not_called()
+
+
+class TestConcurrencySemaphore:
+    def test_semaphore_limits_concurrent_gets(self):
+        client = AsanaClient(token="test-token", max_concurrent_gets=2)
+        assert client._get_semaphore._value == 2
+
+    def test_default_semaphore_value(self):
+        client = AsanaClient(token="test-token")
+        from asana_client import MAX_CONCURRENT_GETS
+        assert client._get_semaphore._value == MAX_CONCURRENT_GETS
