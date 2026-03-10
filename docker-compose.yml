@@ -1,12 +1,11 @@
 services:
   asana-sync:
-    build: .
+    build:
+      context: .
+      target: production
     env_file: .env
     ports:
       - "8000:8000"
     volumes:
-      - sync-data:/app/data
+      - ./asana:/app/asana
     restart: unless-stopped
-
-volumes:
-  sync-data:

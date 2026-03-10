@@ -11,7 +11,7 @@ from asana_client import AsanaClient
 
 logger = logging.getLogger(__name__)
 
-OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "data"))
+OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "asana"))
 
 
 class SyncState:
@@ -55,13 +55,15 @@ class SyncState:
 sync_state = SyncState()
 
 
-def _write_ndjson(path: Path, items: Generator[dict, None, None]) -> int:
-    """Write items as NDJSON — one JSON object per line. Returns count."""
+def _write_individual_files(directory: Path, items: Generator[dict, None, None]) -> int:
+    """Write each item as its own JSON file named by GID. Overwrites on each run."""
+    directory.mkdir(parents=True, exist_ok=True)
     count = 0
-    with open(path, "w") as f:
-        for item in items:
-            f.write(json.dumps(item) + "\n")
-            count += 1
+    for item in items:
+        path = directory / f"{item['gid']}.json"
+        with open(path, "w") as f:
+            json.dump(item, f, indent=2)
+        count += 1
     return count
 
 
@@ -78,18 +80,18 @@ def run_sync(token: str, workspace_gid: str):
 
     try:
         client = AsanaClient(token=token)
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
-        # Extract users
-        users_path = OUTPUT_DIR / f"users_{ts}.ndjson"
-        users_count = _write_ndjson(users_path, client.get_users(workspace_gid=workspace_gid))
-        logger.info(f"Wrote {users_count} users to {users_path}")
+        users_count = _write_individual_files(
+            OUTPUT_DIR / "users",
+            client.get_users(workspace_gid=workspace_gid),
+        )
+        logger.info(f"Wrote {users_count} users to {OUTPUT_DIR / 'users'}/")
 
-        # Extract projects
-        projects_path = OUTPUT_DIR / f"projects_{ts}.ndjson"
-        projects_count = _write_ndjson(projects_path, client.get_projects(workspace_gid=workspace_gid))
-        logger.info(f"Wrote {projects_count} projects to {projects_path}")
+        projects_count = _write_individual_files(
+            OUTPUT_DIR / "projects",
+            client.get_projects(workspace_gid=workspace_gid),
+        )
+        logger.info(f"Wrote {projects_count} projects to {OUTPUT_DIR / 'projects'}/")
 
         elapsed = time.monotonic() - start
         logger.info(f"Sync finished in {elapsed:.1f}s — {users_count} users, {projects_count} projects")
